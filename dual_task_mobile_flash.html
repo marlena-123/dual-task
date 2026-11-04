@@ -295,7 +295,7 @@
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.0-mobile-flash";
+const APP_VERSION = "1.0.1-mobile-flash";
 
 const CONFIG = {
   isiMinS: 15,          // inter-stimulus interval minimum (seconds)
@@ -437,29 +437,22 @@ function scheduleTone(when) {
 }
 
 // Convert an AudioContext time (seconds) to the performance.now() timeline (ms).
-// Uses getOutputTimestamp() to align the two clocks, and adds outputLatency
-// (the estimated delay to the speaker) to approximate true acoustic onset.
+// We map using the correspondence captured once at session start
+// (sessionStartCtx <-> sessionStartPerf). Both clocks advance in real-time
+// seconds, so this linear mapping is accurate and stable for the whole session.
+//
+// We deliberately DO NOT use getOutputTimestamp() here. On iPadOS Safari it
+// returned an inconsistent clock correspondence that roughly DOUBLED every onset
+// time, so each tap came out "before" its tone -> all responses were mis-scored
+// as anticipations with large negative RTs. The session-anchored mapping below
+// avoids that entirely. outputLatency (if the browser reports it) is still added
+// to approximate true acoustic onset.
 function ctxTimeToPerfMs(ctxTime) {
   const ctx = audioCtx;
-  let scheduledPerfMs; // raw: context-clock onset mapped to perf timeline
-  let correctedPerfMs; // + output latency (estimated acoustic onset)
-
-  let ots = null;
-  try { ots = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null; } catch (e) { ots = null; }
-
-  if (ots && ots.contextTime != null && ots.performanceTime != null) {
-    // offset between the two clocks (ms) at the sampled instant
-    const offsetMs = ots.performanceTime - ots.contextTime * 1000;
-    scheduledPerfMs = ctxTime * 1000 + offsetMs;
-  } else {
-    // Fallback: anchor using the stored session start correspondence.
-    scheduledPerfMs = sessionStartPerf + (ctxTime - sessionStartCtx) * 1000;
-  }
-
+  const scheduledPerfMs = sessionStartPerf + (ctxTime - sessionStartCtx) * 1000;
   const latencyMs = (typeof ctx.outputLatency === "number" && ctx.outputLatency > 0)
     ? ctx.outputLatency * 1000 : 0;
-  correctedPerfMs = scheduledPerfMs + latencyMs;
-
+  const correctedPerfMs = scheduledPerfMs + latencyMs;
   return { scheduledPerfMs, correctedPerfMs, latencyMs };
 }
 
