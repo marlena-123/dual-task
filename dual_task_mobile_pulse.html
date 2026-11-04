@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Dual-Task Auditory Probe &mdash; Mobile (pulse feedback)</title>
+<!--
+  ============================================================================
+  DUAL-TASK COGNITIVE LOAD MEASUREMENT - AUDITORY PROBE / RT TASK
+  MOBILE / TOUCH VERSION  (central circle PULSE feedback)
+  ============================================================================
+  Single self-contained HTML file. No external dependencies. Works offline.
+  Participant does a coding task on a SEPARATE device while wearing headphones.
+  This page runs on a tablet or smartphone, fullscreen/foreground, plays sine
+  tones at random intervals; participant TAPS THE SCREEN as fast as possible.
+  A brief central circle pulse confirms each registered tap.
+
+  ---------------------------------------------------------------------------
+  KNOWN TIMING LIMITS (read before interpreting the data)
+  ---------------------------------------------------------------------------
+  * Browser timer resolution: performance.now() and event.timeStamp are
+    coarsened/jittered by browsers for security (often ~0.1-1 ms, sometimes
+    more). Treat sub-millisecond RT differences as noise.
+  * Touchscreen sampling: capacitive touch panels sample at ~60-120 Hz and the
+    result is delivered on the next display refresh (vsync, ~60-120 Hz). This
+    adds a fixed-ish quantisation + jitter (easily 8-20 ms) to every tap RT.
+  * Audio output latency: there is a delay between osc.start(when) and the
+    sound actually reaching the ear (OS mixer buffer + DAC + headphone).
+    We schedule on the AudioContext clock and convert the onset to the
+    performance.now() timeline via getOutputTimestamp(), adding outputLatency
+    when available. The "corrected_onset_ms" is our best estimate of true
+    acoustic onset; "scheduled_onset_ms" is the raw context-clock onset.
+  * ABSOLUTE RT values are therefore NOT hardware-accurate. This design is
+    valid only for WITHIN-SUBJECT / WITHIN-SETUP comparisons.
+  * => ALL participants and BOTH conditions MUST use the SAME device, SAME
+    browser, SAME headphones and the SAME volume. Do not change hardware or
+    settings between participants or conditions.
+  ============================================================================
+-->
+<style>
+  /* ---- Global / neutral dark theme ---- */
+  :root {
+    --bg: #15171b;
+    --panel: #1e2127;
+    --fg: #e6e8ec;
+    --muted: #9aa0a9;
+    --accent: #4f8cff;
+    --border: #333842;
+    --danger: #e0574f;
+    --ok: #5bbf7a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+  }
+  .screen { display: none; width: 100%; min-height: 100vh; }
+  .screen.active { display: block; }
+
+  /* ---- Setup / finished panels (experimenter facing) ---- */
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .04em; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  label { display: block; font-size: 14px; margin: 14px 0 4px; color: var(--fg); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 11px 10px; min-height: 44px; background: var(--panel); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 16px;
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 160px; }
+  fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 18px 0; padding: 0; }
+  fieldset > legend { padding: 0 8px; color: var(--muted); font-size: 13px; cursor: pointer; }
+  fieldset .body { padding: 4px 16px 16px; }
+  fieldset.collapsed .body { display: none; }
+  .explain { margin-top: 16px; padding: 12px 14px; background: rgba(79,140,255,.06);
+       border: 1px solid var(--border); border-radius: 6px; font-size: 13px; color: var(--muted); }
+  .explain b { color: var(--fg); }
+  .explain ul { margin: 8px 0 6px; padding-left: 18px; }
+  .explain li { margin: 5px 0; line-height: 1.45; }
+  button {
+    appearance: none; border: 1px solid var(--border); background: var(--panel);
+    color: var(--fg); padding: 12px 18px; min-height: 44px; font-size: 16px; border-radius: 6px;
+    cursor: pointer; margin: 6px 8px 6px 0;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { border-color: var(--danger); color: var(--danger); }
+  .btnbar { margin-top: 24px; display: flex; flex-wrap: wrap; align-items: center; }
+  .msg { margin: 12px 0; padding: 10px 12px; border-radius: 6px; font-size: 14px; display: none; }
+  .msg.show { display: block; }
+  .msg.err { background: rgba(224,87,79,.12); border: 1px solid var(--danger); color: #ffb3ad; }
+  .msg.info { background: rgba(79,140,255,.12); border: 1px solid var(--accent); }
+
+  /* ---- Participant-facing session screen: nearly blank, whole screen is the tap target ---- */
+  #sessionScreen, #practiceScreen {
+    background: #0d0e10; color: #cfd2d8;
+    display: none; align-items: center; justify-content: center;
+    text-align: center; flex-direction: column;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #sessionScreen.active, #practiceScreen.active { display: flex; }
+  .fixation { width: 10px; height: 10px; border-radius: 50%; background: #3a3f48; margin: 18px auto; }
+  .instruction { color: #70757e; font-size: 20px; letter-spacing: .02em; padding: 0 24px; }
+  #practiceFeedback { min-height: 28px; font-size: 20px; margin-top: 18px; color: #8a9099; }
+  .cursor-hidden, .cursor-hidden * { cursor: none !important; }
+
+  /* Experimenter early-stop control (unobtrusive; does not count as a response) */
+  .stopbtn { position: fixed; top: 10px; right: 10px; z-index: 60; opacity: .22;
+       font-size: 12px; min-height: 0; padding: 6px 10px; margin: 0; }
+
+  /* ---- Central circle PULSE feedback on each registered tap ---- */
+  #pulseCircle {
+    position: fixed; left: 50%; top: 50%; width: 150px; height: 150px;
+    margin: -75px 0 0 -75px; border-radius: 50%; background: var(--ok);
+    opacity: 0; pointer-events: none; z-index: 50;
+  }
+  #pulseCircle.pulse { animation: pulseAnim 240ms ease-out; }
+  @keyframes pulseAnim {
+    0%   { opacity: .6; transform: scale(.55); }
+    100% { opacity: 0;  transform: scale(1.35); }
+  }
+
+  /* ---- Finished / summary ---- */
+  table.summary { border-collapse: collapse; margin-top: 12px; width: 100%; }
+  table.summary td, table.summary th { border: 1px solid var(--border); padding: 7px 10px;
+       text-align: left; font-size: 14px; }
+  table.summary th { color: var(--muted); font-weight: 600; }
+  code.kbd { background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+       padding: 1px 6px; font-size: 13px; }
+  .big-center { text-align: center; padding-top: 12vh; }
+  .big-center h1 { font-size: 28px; }
+</style>
+</head>
+<body>
+
+<!-- ======================= SETUP SCREEN (experimenter) ======================= -->
+<div id="setupScreen" class="screen active">
+  <div class="wrap">
+    <h1>Dual-Task Auditory Probe &mdash; Mobile Setup</h1>
+    <p class="sub">Experimenter screen. Configure, test the sound, run a practice block, then start the session. Participant <b>taps the screen</b> when they hear a tone.</p>
+
+    <div id="setupMsg" class="msg"></div>
+
+    <div class="row">
+      <div>
+        <label for="pid">Participant ID</label>
+        <input type="text" id="pid" placeholder="e.g. P01" autocomplete="off" />
+      </div>
+      <div>
+        <label for="condition">Condition</label>
+        <select id="condition">
+          <option value="1 AI Agent">1 AI Agent</option>
+          <option value="3 AI Agents">3 AI Agents</option>
+        </select>
+      </div>
+      <div>
+        <label for="sessionMin">Session length (minutes)</label>
+        <input type="number" id="sessionMin" value="30" min="1" step="1" />
+      </div>
+    </div>
+
+    <fieldset id="advanced" class="collapsed">
+      <legend id="advLegend">&#9656; Advanced settings</legend>
+      <div class="body">
+        <div class="row">
+          <div>
+            <label for="isiMin">ISI min (s)</label>
+            <input type="number" id="isiMin" value="15" min="1" step="0.5" />
+          </div>
+          <div>
+            <label for="isiMax">ISI max (s)</label>
+            <input type="number" id="isiMax" value="45" min="1" step="0.5" />
+          </div>
+          <div>
+            <label for="firstDelay">First probe not before (s)</label>
+            <input type="number" id="firstDelay" value="30" min="0" step="1" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="toneHz">Tone frequency (Hz)</label>
+            <input type="number" id="toneHz" value="1000" min="100" step="10" />
+          </div>
+          <div>
+            <label for="toneMs">Tone duration (ms)</label>
+            <input type="number" id="toneMs" value="150" min="20" step="10" />
+          </div>
+          <div>
+            <label for="respWin">Response window (ms)</label>
+            <input type="number" id="respWin" value="3000" min="500" step="100" />
+          </div>
+          <div>
+            <label for="volume">Volume (0&ndash;1)</label>
+            <input type="number" id="volume" value="0.5" min="0" max="1" step="0.05" />
+          </div>
+        </div>
+        <p class="hint">Fade in/out is fixed at 10&nbsp;ms. Anticipation threshold fixed at 100&nbsp;ms.</p>
+
+        <div class="explain">
+          <b>What these settings mean</b>
+          <ul>
+            <li><b>ISI min / max (s)</b> &mdash; the gap between tones. Each gap is picked at random
+                between these two values, so tones stay unpredictable. Default 15&ndash;45&nbsp;s.</li>
+            <li><b>First probe not before (s)</b> &mdash; a quiet lead-in so the first tone does not
+                arrive immediately after the session starts. Default 30&nbsp;s.</li>
+            <li><b>Tone frequency (Hz)</b> &mdash; the pitch of the beep. Higher = higher pitch.
+                Default 1000&nbsp;Hz (a clear mid tone).</li>
+            <li><b>Tone duration (ms)</b> &mdash; how long each beep lasts. Default 150&nbsp;ms
+                (a short beep).</li>
+            <li><b>Response window (ms)</b> &mdash; how long after a tone a TAP still counts
+                as a reaction to it. After this, it is scored as a miss. Default 3000&nbsp;ms (3&nbsp;s).</li>
+            <li><b>Volume (0&ndash;1)</b> &mdash; loudness of the tone, 0 = silent, 1 = loudest.
+                Set this once with &ldquo;Test sound&rdquo; and keep it the same for everyone.</li>
+          </ul>
+          <span class="hint">Keep all values identical across participants and both conditions.</span>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="btnbar">
+      <button id="btnTestSound">Test sound</button>
+      <button id="btnTimingCheck">Timing check (20 tones)</button>
+      <button id="btnPractice">Start practice</button>
+      <button id="btnStart" class="primary">Start session</button>
+    </div>
+    <p class="hint">Starting requires a tap (to unlock browser audio) and will try to go fullscreen.
+       Put participant's headphones on and set volume with &ldquo;Test sound&rdquo; first.</p>
+  </div>
+</div>
+
+<!-- ======================= PRACTICE SCREEN (participant) ======================= -->
+<div id="practiceScreen" class="screen">
+  <button class="stopbtn" type="button">Stop</button>
+  <div>
+    <div class="instruction">Practice &mdash; <b>tap the screen</b> when you hear the tone.</div>
+    <div class="fixation"></div>
+    <div id="practiceFeedback"></div>
+  </div>
+</div>
+
+<!-- ======================= SESSION SCREEN (participant, nearly blank) ======================= -->
+<div id="sessionScreen" class="screen">
+  <button class="stopbtn" type="button">Stop</button>
+  <div>
+    <div class="instruction">Tap the screen when you hear the tone.</div>
+    <div class="fixation"></div>
+  </div>
+</div>
+
+<!-- Central circle pulse feedback (shared by both screens) -->
+<div id="pulseCircle"></div>
+
+<!-- ======================= FINISHED SCREEN (participant sees thanks, experimenter opens summary) ======================= -->
+<div id="finishedScreen" class="screen">
+  <div class="wrap big-center">
+    <h1>Session finished &mdash; thank you!</h1>
+    <p class="sub">You can take off the headphones. The experimenter will continue.</p>
+    <div class="btnbar" style="justify-content:center;">
+      <button id="btnShowSummary">Show summary</button>
+      <button id="btnDownloadCsv">Download CSV</button>
+      <button id="btnDownloadJson">Download JSON</button>
+    </div>
+    <div id="summaryBox" style="display:none; text-align:left; margin-top:20px;"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ===========================================================================
+   CONFIG  (all tunable values in one place; advanced UI overrides these)
+   =========================================================================== */
+const APP_VERSION = "1.0.0-mobile-pulse";
+
+const CONFIG = {
+  isiMinS: 15,          // inter-stimulus interval minimum (seconds)
+  isiMaxS: 45,          // inter-stimulus interval maximum (seconds)
+  firstDelayS: 30,      // first probe not before this many seconds
+  sessionMin: 30,       // session length (minutes)
+  toneHz: 1000,         // sine tone frequency (Hz)
+  toneMs: 150,          // tone duration (ms)
+  fadeMs: 10,           // fixed fade in/out (ms) to avoid clicks
+  respWindowMs: 3000,   // response window after onset (ms)
+  anticipationMs: 100,  // RT below this = anticipation (invalid)
+  volume: 0.5,          // peak gain (0..1)
+  // Practice block:
+  practiceCount: 4,     // number of practice probes (3-5)
+  practiceIsiMinS: 5,
+  practiceIsiMaxS: 10,
+  practiceFirstDelayS: 3,
+  // Timing-check mode:
+  timingCheckTones: 20,
+  timingCheckIsiS: 2,
+};
+
+/* ===========================================================================
+   STATE
+   =========================================================================== */
+let audioCtx = null;              // Web Audio context (created on first tap)
+let running = false;              // main/practice session active
+let isPractice = false;
+let schedule = [];                // pre-generated onset schedule (ms from start, context time)
+let trials = [];                  // main-session trial records
+let practiceTrials = [];          // practice trial records
+let falseAlarms = [];             // false alarm records (main session)
+let currentProbeIndex = -1;       // index of probe currently awaiting response
+let probeWindowOpen = false;      // true while within a response window
+let currentProbe = null;          // the probe object we are waiting on
+let sessionStartPerf = 0;         // performance.now() at session start
+let sessionStartCtx = 0;          // audioCtx.currentTime at session start
+let wakeLock = null;              // Screen Wake Lock sentinel
+let sessionTimers = [];           // pending setTimeout ids (for cleanup)
+let sessionEndTimer = null;
+let meta = {};                    // participant/condition/settings snapshot
+let beforeUnloadActive = false;
+
+/* ===========================================================================
+   SMALL HELPERS
+   =========================================================================== */
+const $ = (id) => document.getElementById(id);
+
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
+  $(id).classList.add("active");
+}
+
+function setMsg(text, kind) {
+  const m = $("setupMsg");
+  m.textContent = text;
+  m.className = "msg show " + (kind || "info");
+}
+function clearMsg() { $("setupMsg").className = "msg"; }
+
+function randUniform(min, max) { return min + Math.random() * (max - min); }
+
+// Read settings from the UI into CONFIG and a meta snapshot.
+function readConfigFromUI() {
+  const num = (id, def) => {
+    const v = parseFloat($(id).value);
+    return Number.isFinite(v) ? v : def;
+  };
+  CONFIG.isiMinS = num("isiMin", CONFIG.isiMinS);
+  CONFIG.isiMaxS = num("isiMax", CONFIG.isiMaxS);
+  CONFIG.firstDelayS = num("firstDelay", CONFIG.firstDelayS);
+  CONFIG.sessionMin = num("sessionMin", CONFIG.sessionMin);
+  CONFIG.toneHz = num("toneHz", CONFIG.toneHz);
+  CONFIG.toneMs = num("toneMs", CONFIG.toneMs);
+  CONFIG.respWindowMs = num("respWin", CONFIG.respWindowMs);
+  CONFIG.volume = Math.max(0, Math.min(1, num("volume", CONFIG.volume)));
+
+  meta = {
+    participant_id: $("pid").value.trim(),
+    condition: $("condition").value,
+    input_method: "touch",
+    feedback_style: "pulse",
+    tone_hz: CONFIG.toneHz,
+    tone_ms: CONFIG.toneMs,
+    user_agent: navigator.userAgent,
+    app_version: APP_VERSION,
+    config: JSON.parse(JSON.stringify(CONFIG)),
+  };
+}
+
+/* ===========================================================================
+   AUDIO
+   =========================================================================== */
+let audioUnlocked = false;
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  // iOS: a WebAudio context stays silent until an actual sound is started
+  // inside a user gesture. Play a 1-sample silent buffer once to unlock
+  // audio output. (Must be called from a tap/click handler, which it is.)
+  if (!audioUnlocked) {
+    try {
+      const b = audioCtx.createBuffer(1, 1, 22050);
+      const s = audioCtx.createBufferSource();
+      s.buffer = b; s.connect(audioCtx.destination); s.start(0);
+      audioUnlocked = true;
+    } catch (e) { /* non-fatal */ }
+  }
+  return audioCtx;
+}
+
+// Schedule a sine tone at AudioContext time `when` (seconds, context clock).
+// Returns { when } so caller can convert to the performance.now() timeline.
+// Uses a gain envelope with 10 ms linear fades to avoid clicks.
+function scheduleTone(when) {
+  const ctx = ensureAudio();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = CONFIG.toneHz;
+
+  const fade = CONFIG.fadeMs / 1000;
+  const dur = CONFIG.toneMs / 1000;
+  const peak = CONFIG.volume;
+
+  // Envelope: 0 -> peak (fade in) -> hold -> 0 (fade out)
+  gain.gain.setValueAtTime(0.0001, when);
+  gain.gain.linearRampToValueAtTime(peak, when + fade);
+  gain.gain.setValueAtTime(peak, when + Math.max(fade, dur - fade));
+  gain.gain.linearRampToValueAtTime(0.0001, when + dur);
+
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(when);
+  osc.stop(when + dur + 0.02);
+  return { when };
+}
+
+// Convert an AudioContext time (seconds) to the performance.now() timeline (ms).
+// Uses getOutputTimestamp() to align the two clocks, and adds outputLatency
+// (the estimated delay to the speaker) to approximate true acoustic onset.
+function ctxTimeToPerfMs(ctxTime) {
+  const ctx = audioCtx;
+  let scheduledPerfMs; // raw: context-clock onset mapped to perf timeline
+  let correctedPerfMs; // + output latency (estimated acoustic onset)
+
+  let ots = null;
+  try { ots = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null; } catch (e) { ots = null; }
+
+  if (ots && ots.contextTime != null && ots.performanceTime != null) {
+    // offset between the two clocks (ms) at the sampled instant
+    const offsetMs = ots.performanceTime - ots.contextTime * 1000;
+    scheduledPerfMs = ctxTime * 1000 + offsetMs;
+  } else {
+    // Fallback: anchor using the stored session start correspondence.
+    scheduledPerfMs = sessionStartPerf + (ctxTime - sessionStartCtx) * 1000;
+  }
+
+  const latencyMs = (typeof ctx.outputLatency === "number" && ctx.outputLatency > 0)
+    ? ctx.outputLatency * 1000 : 0;
+  correctedPerfMs = scheduledPerfMs + latencyMs;
+
+  return { scheduledPerfMs, correctedPerfMs, latencyMs };
+}
+
+/* ===========================================================================
+   SCHEDULE GENERATION
+   Pre-generate all onset times (ms from session start, in context-clock terms)
+   so the schedule is fixed and stored with the data.
+   =========================================================================== */
+function buildSchedule(opts) {
+  const out = [];
+  let t = opts.firstDelayS; // seconds from start
+  let n = 0;
+  if (opts.fixedCount) {
+    // Practice / timing-check: fixed number of probes.
+    for (let i = 0; i < opts.fixedCount; i++) {
+      const isi = (i === 0) ? opts.firstDelayS
+                            : randUniform(opts.isiMinS, opts.isiMaxS);
+      if (i === 0) {
+        t = opts.firstDelayS;
+      } else {
+        t += isi;
+      }
+      out.push({ index: n++, onsetS: t, isiMs: (i === 0 ? opts.firstDelayS : isi) * 1000 });
+    }
+    return out;
+  }
+  // Main session: fill until session length, random ISIs.
+  const totalS = opts.sessionMin * 60;
+  let first = true;
+  while (t <= totalS) {
+    const isi = first ? opts.firstDelayS : randUniform(opts.isiMinS, opts.isiMaxS);
+    if (!first) t += isi; // for first, t already = firstDelayS
+    if (t > totalS) break;
+    out.push({ index: n++, onsetS: t, isiMs: isi * 1000 });
+    first = false;
+  }
+  return out;
+}
+
+/* ===========================================================================
+   SESSION LIFECYCLE
+   =========================================================================== */
+async function requestFullscreen() {
+  try {
+    const el = document.documentElement;
+    if (el.requestFullscreen) await el.requestFullscreen();
+  } catch (e) { /* non-fatal (e.g. iOS Safari on iPhone) */ }
+}
+
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      // Re-acquire if it is released (e.g. tab hidden then shown).
+      document.addEventListener("visibilitychange", reacquireWakeLock);
+    }
+  } catch (e) { /* non-fatal */ }
+}
+async function reacquireWakeLock() {
+  if (wakeLock !== null && document.visibilityState === "visible" && running) {
+    try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+}
+function releaseWakeLock() {
+  document.removeEventListener("visibilitychange", reacquireWakeLock);
+  if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+}
+
+function enableBeforeUnload() {
+  beforeUnloadActive = true;
+}
+function disableBeforeUnload() {
+  beforeUnloadActive = false;
+}
+window.addEventListener("beforeunload", (e) => {
+  if (beforeUnloadActive) { e.preventDefault(); e.returnValue = ""; return ""; }
+});
+
+function hideCursor(on) {
+  document.body.classList.toggle("cursor-hidden", !!on);
+}
+
+// Start a block (practice or main). Both share probe/response logic.
+async function startBlock(practice) {
+  readConfigFromUI();
+  if (!practice && !meta.participant_id) {
+    setMsg("Please enter a Participant ID before starting the session.", "err");
+    return;
+  }
+  if (CONFIG.isiMinS > CONFIG.isiMaxS) {
+    setMsg("ISI min must be ≤ ISI max.", "err");
+    return;
+  }
+
+  ensureAudio();
+  isPractice = practice;
+  running = true;
+  trials = practice ? trials : [];
+  practiceTrials = practice ? [] : practiceTrials;
+  falseAlarms = practice ? falseAlarms : [];
+  currentProbeIndex = -1;
+  probeWindowOpen = false;
+  currentProbe = null;
+  sessionTimers = [];
+
+  // Build schedule.
+  if (practice) {
+    schedule = buildSchedule({
+      fixedCount: CONFIG.practiceCount,
+      firstDelayS: CONFIG.practiceFirstDelayS,
+      isiMinS: CONFIG.practiceIsiMinS,
+      isiMaxS: CONFIG.practiceIsiMaxS,
+    });
+  } else {
+    schedule = buildSchedule({
+      sessionMin: CONFIG.sessionMin,
+      firstDelayS: CONFIG.firstDelayS,
+      isiMinS: CONFIG.isiMinS,
+      isiMaxS: CONFIG.isiMaxS,
+    });
+  }
+
+  await requestFullscreen();
+  await requestWakeLock();
+  enableBeforeUnload();
+  hideCursor(true);
+
+  showScreen(practice ? "practiceScreen" : "sessionScreen");
+  if (practice) $("practiceFeedback").textContent = "";
+
+  // Anchor the two clocks at start.
+  sessionStartCtx = audioCtx.currentTime;
+  sessionStartPerf = performance.now();
+  // Give a small lead so the first scheduled tone is comfortably in the future.
+  const startCtx = sessionStartCtx + 0.2;
+
+  // Schedule every tone on the audio clock and arm response-window logic.
+  schedule.forEach((probe) => {
+    const whenCtx = startCtx + probe.onsetS;
+    probe.whenCtx = whenCtx;
+
+    // 1) schedule the actual audio
+    scheduleTone(whenCtx);
+
+    // 2) arm response window just before onset using a setTimeout driven by
+    //    the perf clock. The *timing* of the tone comes from the audio clock;
+    //    this timeout only flips bookkeeping flags, it does not play sound.
+    const onsetPerfApprox = sessionStartPerf + (whenCtx - sessionStartCtx) * 1000;
+    const armDelay = Math.max(0, onsetPerfApprox - performance.now());
+    sessionTimers.push(setTimeout(() => openProbe(probe), armDelay));
+    sessionTimers.push(setTimeout(() => closeProbe(probe), armDelay + CONFIG.respWindowMs));
+  });
+
+  // Schedule session end (main session only) a bit after the last window closes.
+  if (!practice) {
+    const lastOnsetS = schedule.length ? schedule[schedule.length - 1].onsetS : 0;
+    const endDelayMs = Math.max(CONFIG.sessionMin * 60 * 1000,
+                                (lastOnsetS * 1000) + CONFIG.respWindowMs) + 500;
+    sessionEndTimer = setTimeout(() => endSession(false), endDelayMs);
+  } else {
+    // End practice shortly after last window.
+    const lastOnsetS = schedule.length ? schedule[schedule.length - 1].onsetS : 0;
+    const endDelayMs = (lastOnsetS * 1000) + CONFIG.respWindowMs + 1200;
+    sessionEndTimer = setTimeout(() => endPractice(), endDelayMs);
+  }
+}
+
+// Called at (approx) tone onset: record precise onset from the audio clock,
+// open the response window.
+function openProbe(probe) {
+  if (!running) return;
+  const t = ctxTimeToPerfMs(probe.whenCtx);
+  probe.scheduledOnsetMs = t.scheduledPerfMs; // raw context->perf mapping
+  probe.correctedOnsetMs = t.correctedPerfMs; // + output latency
+  probe.latencyMs = t.latencyMs;
+  probe.responded = false;
+  currentProbe = probe;
+  currentProbeIndex = probe.index;
+  probeWindowOpen = true;
+}
+
+// Called at end of response window: if no valid press, log a miss.
+function closeProbe(probe) {
+  if (!running) return;
+  if (!probe.responded) {
+    logTrial(probe, null, "miss");
+    if (isPractice) showPracticeFeedback("Miss");
+  }
+  if (currentProbe === probe) {
+    probeWindowOpen = false;
+    currentProbe = null;
+  }
+}
+
+/* ===========================================================================
+   RESPONSE HANDLING (touch/tap)
+   =========================================================================== */
+// Tap anywhere on the session/practice screen = a response. Taps on the
+// experimenter "Stop" control are ignored here (handled separately).
+function onResponseTap(e) {
+  // Read the clock immediately. We do NOT use event.timeStamp: on iOS Safari
+  // it is unreliable for touch/pointer events (often 0 or on a different time
+  // origin), which made every tap score as an anticipation ("Too early").
+  const pressMs = performance.now();
+  if (e.target.closest(".stopbtn")) return;
+  e.preventDefault();          // block scrolling / double-tap zoom / synthetic click
+  if (!running) return;
+  ensureAudio();               // keep the audio context alive on mobile
+  handleResponse(pressMs);     // performance.now() timeline (matches onset times)
+}
+
+// Shared classification: hit / anticipation / false alarm. Every accepted tap
+// triggers visual feedback so the participant knows the tap registered.
+function handleResponse(pressMs) {
+  flashFeedback();
+
+  if (probeWindowOpen && currentProbe && !currentProbe.responded) {
+    const probe = currentProbe;
+    const rt = pressMs - probe.correctedOnsetMs;
+    if (rt < CONFIG.anticipationMs) {
+      // Too fast to be a genuine response to this tone.
+      probe.responded = true; // first press counts; invalid anticipation
+      logTrial(probe, pressMs, "anticipation");
+      if (isPractice) showPracticeFeedback("Too early!");
+    } else {
+      probe.responded = true; // only first valid press per probe counts
+      logTrial(probe, pressMs, "hit");
+      if (isPractice) showPracticeFeedback(rt.toFixed(0) + " ms");
+    }
+  } else {
+    // Press outside any open window => false alarm.
+    const elapsed = pressMs - sessionStartPerf;
+    const rec = {
+      practice: isPractice,
+      response_timestamp_ms: pressMs,
+      session_elapsed_ms: elapsed,
+    };
+    if (isPractice) {
+      practiceTrials.push(makeTrialRow(null, rec, "false_alarm"));
+      showPracticeFeedback("No tone");
+    } else {
+      falseAlarms.push(rec);
+      trials.push(makeTrialRow(null, rec, "false_alarm"));
+    }
+    persistBackup();
+  }
+}
+
+// Experimenter early-stop via keyboard (if a keyboard happens to be attached).
+function onKeyDown(e) {
+  if (e.ctrlKey && e.shiftKey && (e.key === "Q" || e.key === "q")) {
+    e.preventDefault();
+    if (running) attemptEarlyStop();
+  }
+}
+
+// Central circle pulse confirming a registered tap.
+function flashFeedback() {
+  const o = $("pulseCircle");
+  o.classList.remove("pulse");
+  void o.offsetWidth; // force reflow so the animation restarts on rapid taps
+  o.classList.add("pulse");
+}
+
+function showPracticeFeedback(txt) {
+  const el = $("practiceFeedback");
+  el.textContent = txt;
+  setTimeout(() => { if (el.textContent === txt) el.textContent = ""; }, 900);
+}
+
+/* ===========================================================================
+   TRIAL RECORDS
+   =========================================================================== */
+// Build a normalised trial row (used for hits/misses/anticipations/false alarms).
+function makeTrialRow(probe, resp, outcome) {
+  const row = {
+    participant_id: meta.participant_id || "",
+    condition: meta.condition || "",
+    practice: isPractice,
+    trial_number: probe ? (probe.index + 1) : "",
+    scheduled_isi_ms: probe ? round2(probe.isiMs) : "",
+    scheduled_onset_ms: probe && probe.scheduledOnsetMs != null ? round2(probe.scheduledOnsetMs) : "",
+    corrected_onset_ms: probe && probe.correctedOnsetMs != null ? round2(probe.correctedOnsetMs) : "",
+    response_timestamp_ms: resp && resp.response_timestamp_ms != null ? round2(resp.response_timestamp_ms) : "",
+    rt_ms: "",
+    outcome: outcome,
+    session_elapsed_ms: "",
+    tone_hz: CONFIG.toneHz,
+    tone_ms: CONFIG.toneMs,
+    input_method: "touch",
+    user_agent: meta.user_agent || navigator.userAgent,
+    audio_output_latency_ms: probe && probe.latencyMs != null ? round2(probe.latencyMs) : "",
+    app_version: APP_VERSION,
+  };
+  // elapsed + rt
+  if (resp && resp.response_timestamp_ms != null) {
+    row.session_elapsed_ms = round2(resp.response_timestamp_ms - sessionStartPerf);
+    if (probe && probe.correctedOnsetMs != null && (outcome === "hit" || outcome === "anticipation")) {
+      row.rt_ms = round2(resp.response_timestamp_ms - probe.correctedOnsetMs);
+    }
+  } else if (probe && probe.correctedOnsetMs != null) {
+    row.session_elapsed_ms = round2(probe.correctedOnsetMs - sessionStartPerf);
+  }
+  return row;
+}
+
+function logTrial(probe, pressMs, outcome) {
+  const resp = pressMs != null ? { response_timestamp_ms: pressMs } : null;
+  const row = makeTrialRow(probe, resp, outcome);
+  if (isPractice) practiceTrials.push(row);
+  else trials.push(row);
+  persistBackup();
+}
+
+function round2(x) { return Math.round(x * 100) / 100; }
+
+/* ===========================================================================
+   PERSISTENCE (localStorage backup after each trial)
+   =========================================================================== */
+function backupKey() {
+  const pid = (meta.participant_id || "unknown").replace(/\s+/g, "_");
+  return "dualtask_mobile_backup_" + pid + "_" + (meta.condition || "").replace(/\s+/g, "_");
+}
+function persistBackup() {
+  try {
+    const payload = buildDataObject();
+    localStorage.setItem(backupKey(), JSON.stringify(payload));
+    localStorage.setItem("dualtask_mobile_last", backupKey());
+  } catch (e) { /* storage full / disabled - non-fatal */ }
+}
+
+/* ===========================================================================
+   END / STOP
+   =========================================================================== */
+function clearTimers() {
+  sessionTimers.forEach((id) => clearTimeout(id));
+  sessionTimers = [];
+  if (sessionEndTimer) { clearTimeout(sessionEndTimer); sessionEndTimer = null; }
+}
+
+function attemptEarlyStop() {
+  // Confirm before ending; data so far is saved either way.
+  const ok = window.confirm("Stop the session early?\nData collected so far will be saved.");
+  if (ok) endSession(true);
+}
+
+function endPractice() {
+  if (!running) return;
+  running = false;
+  clearTimers();
+  hideCursor(false);
+  disableBeforeUnload();
+  releaseWakeLock();
+  isPractice = false;
+  // Return to setup so experimenter can start the real session.
+  showScreen("setupScreen");
+  setMsg("Practice complete (" + practiceTrials.filter(t => t.outcome==='hit').length +
+         " hits). Ready to start the session.", "info");
+}
+
+async function endSession(early) {
+  running = false;
+  clearTimers();
+  hideCursor(false);
+  disableBeforeUnload();
+  releaseWakeLock();
+  try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
+
+  persistBackup();
+
+  // Auto-download CSV; offer JSON via button.
+  const fname = buildFileBase();
+  downloadFile(fname + ".csv", buildCSV(), "text/csv");
+
+  // Prepare finished screen.
+  renderFinished(early);
+  showScreen("finishedScreen");
+}
+
+/* ===========================================================================
+   DATA OBJECTS / EXPORT
+   =========================================================================== */
+function buildFileBase() {
+  const pid = (meta.participant_id || "unknown").replace(/[^\w\-]+/g, "_");
+  const cond = (meta.condition || "").replace(/[^\w\-]+/g, "_");
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" +
+                p(d.getHours()) + p(d.getMinutes());
+  return pid + "_" + cond + "_mobile_" + stamp;
+}
+
+function buildDataObject() {
+  return {
+    app_version: APP_VERSION,
+    exported_at: new Date().toISOString(),
+    meta: meta,
+    schedule: schedule.map((p) => ({
+      index: p.index,
+      scheduled_onset_s: round2(p.onsetS),
+      scheduled_isi_ms: round2(p.isiMs),
+    })),
+    trials: trials,
+    practice_trials: practiceTrials,
+  };
+}
+
+const CSV_COLUMNS = [
+  "participant_id", "condition", "practice", "trial_number",
+  "scheduled_isi_ms", "scheduled_onset_ms", "corrected_onset_ms",
+  "response_timestamp_ms", "rt_ms", "outcome", "session_elapsed_ms",
+  "tone_hz", "tone_ms", "input_method", "user_agent", "audio_output_latency_ms", "app_version",
+];
+
+function csvEscape(v) {
+  const s = (v === null || v === undefined) ? "" : String(v);
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function buildCSV() {
+  const rows = [CSV_COLUMNS.join(",")];
+  // Include practice trials too (flagged practice=true) for completeness.
+  const all = practiceTrials.concat(trials);
+  all.forEach((r) => {
+    rows.push(CSV_COLUMNS.map((c) => csvEscape(r[c])).join(","));
+  });
+  return rows.join("\r\n");
+}
+
+function downloadFile(name, content, mime) {
+  const blob = new Blob([content], { type: mime + ";charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/* ===========================================================================
+   SUMMARY (experimenter only; behind "Show summary")
+   =========================================================================== */
+function computeSummary() {
+  // Main session only (exclude practice).
+  const hits = trials.filter((t) => t.outcome === "hit");
+  const misses = trials.filter((t) => t.outcome === "miss");
+  const antic = trials.filter((t) => t.outcome === "anticipation");
+  const fa = trials.filter((t) => t.outcome === "false_alarm");
+  const rts = hits.map((t) => Number(t.rt_ms)).filter((x) => Number.isFinite(x));
+
+  const mean = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : null;
+  let median = null, sd = null;
+  if (rts.length) {
+    const s = rts.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    if (rts.length > 1) {
+      const v = rts.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rts.length - 1);
+      sd = Math.sqrt(v);
+    } else sd = 0;
+  }
+  return {
+    hits: hits.length, misses: misses.length, anticipations: antic.length,
+    falseAlarms: fa.length, probes: schedule.length,
+    meanRt: mean, medianRt: median, sdRt: sd,
+  };
+}
+
+function renderFinished(early) {
+  const box = $("summaryBox");
+  box.style.display = "none";
+  box.dataset.early = early ? "1" : "0";
+}
+
+function renderSummaryTable() {
+  const s = computeSummary();
+  const fmt = (x) => (x === null ? "—" : x.toFixed(1));
+  const box = $("summaryBox");
+  box.innerHTML =
+    '<h2>Session summary (experimenter)</h2>' +
+    (box.dataset.early === "1" ? '<p class="hint">Session was stopped early.</p>' : '') +
+    '<table class="summary">' +
+    '<tr><th>Probes scheduled</th><td>' + s.probes + '</td></tr>' +
+    '<tr><th>Hits</th><td>' + s.hits + '</td></tr>' +
+    '<tr><th>Misses</th><td>' + s.misses + '</td></tr>' +
+    '<tr><th>Anticipations (invalid)</th><td>' + s.anticipations + '</td></tr>' +
+    '<tr><th>False alarms</th><td>' + s.falseAlarms + '</td></tr>' +
+    '<tr><th>Mean RT (hits)</th><td>' + fmt(s.meanRt) + ' ms</td></tr>' +
+    '<tr><th>Median RT (hits)</th><td>' + fmt(s.medianRt) + ' ms</td></tr>' +
+    '<tr><th>SD RT (hits)</th><td>' + fmt(s.sdRt) + ' ms</td></tr>' +
+    '</table>';
+  box.style.display = "block";
+}
+
+/* ===========================================================================
+   TIMING CHECK MODE
+   Plays 20 tones at a short fixed ISI; experimenter taps in sync.
+   Logs as practice=true; a rough sanity check only
+   (NOT a true hardware calibration).
+   =========================================================================== */
+async function startTimingCheck() {
+  readConfigFromUI();
+  ensureAudio();
+  isPractice = true;
+  running = true;
+  practiceTrials = [];
+  schedule = buildSchedule({
+    fixedCount: CONFIG.timingCheckTones,
+    firstDelayS: CONFIG.timingCheckIsiS,
+    isiMinS: CONFIG.timingCheckIsiS,
+    isiMaxS: CONFIG.timingCheckIsiS,
+  });
+  currentProbe = null; probeWindowOpen = false;
+
+  showScreen("practiceScreen");
+  $("practiceFeedback").textContent = "Timing check: tap with each tone.";
+
+  sessionStartCtx = audioCtx.currentTime;
+  sessionStartPerf = performance.now();
+  const startCtx = sessionStartCtx + 0.2;
+
+  schedule.forEach((probe) => {
+    const whenCtx = startCtx + probe.onsetS;
+    probe.whenCtx = whenCtx;
+    scheduleTone(whenCtx);
+    const onsetPerfApprox = sessionStartPerf + (whenCtx - sessionStartCtx) * 1000;
+    const armDelay = Math.max(0, onsetPerfApprox - performance.now());
+    sessionTimers.push(setTimeout(() => openProbe(probe), armDelay));
+    sessionTimers.push(setTimeout(() => closeProbe(probe), armDelay + CONFIG.respWindowMs));
+  });
+
+  const lastOnsetS = schedule[schedule.length - 1].onsetS;
+  sessionEndTimer = setTimeout(() => {
+    running = false; clearTimers();
+    const hits = practiceTrials.filter((t) => t.outcome === "hit").map((t) => Number(t.rt_ms));
+    let mean = null, sd = null;
+    if (hits.length) {
+      mean = hits.reduce((a, b) => a + b, 0) / hits.length;
+      const v = hits.length > 1 ? hits.reduce((a, b) => a + (b - mean) ** 2, 0) / (hits.length - 1) : 0;
+      sd = Math.sqrt(v);
+    }
+    showScreen("setupScreen");
+    hideCursor(false);
+    setMsg("Timing check done. " + hits.length + " synced taps. " +
+      (mean !== null ? "Mean RT " + mean.toFixed(1) + " ms, SD " + sd.toFixed(1) + " ms. " : "") +
+      "Low SD => stable timing (rough sanity check only).", "info");
+    isPractice = false;
+  }, (lastOnsetS * 1000) + CONFIG.respWindowMs + 800);
+
+  hideCursor(true);
+}
+
+/* ===========================================================================
+   WIRING / EVENT LISTENERS
+   =========================================================================== */
+// Response input: tap anywhere on the session/practice screen.
+$("sessionScreen").addEventListener("pointerdown", onResponseTap, { passive: false });
+$("practiceScreen").addEventListener("pointerdown", onResponseTap, { passive: false });
+
+// Experimenter early-stop: on-screen button (no keyboard needed) + keyboard combo.
+document.querySelectorAll(".stopbtn").forEach((b) =>
+  b.addEventListener("click", () => { if (running) attemptEarlyStop(); }));
+document.addEventListener("keydown", onKeyDown, true);
+
+// Advanced settings collapse/expand.
+$("advLegend").addEventListener("click", () => {
+  const fs = $("advanced");
+  fs.classList.toggle("collapsed");
+  $("advLegend").innerHTML = (fs.classList.contains("collapsed") ? "&#9656;" : "&#9662;") + " Advanced settings";
+});
+
+// Test sound: plays one tone ~100 ms in the future so the experimenter can set volume.
+$("btnTestSound").addEventListener("click", () => {
+  readConfigFromUI();
+  const ctx = ensureAudio();
+  scheduleTone(ctx.currentTime + 0.1);
+  setMsg("Test tone played (" + CONFIG.toneHz + " Hz, " + CONFIG.toneMs + " ms). Adjust headphone volume.", "info");
+});
+
+$("btnTimingCheck").addEventListener("click", () => { clearMsg(); startTimingCheck(); });
+$("btnPractice").addEventListener("click", () => { clearMsg(); startBlock(true); });
+$("btnStart").addEventListener("click", () => { clearMsg(); startBlock(false); });
+
+// Finished screen buttons.
+$("btnShowSummary").addEventListener("click", renderSummaryTable);
+$("btnDownloadCsv").addEventListener("click", () => {
+  downloadFile(buildFileBase() + ".csv", buildCSV(), "text/csv");
+});
+$("btnDownloadJson").addEventListener("click", () => {
+  downloadFile(buildFileBase() + ".json", JSON.stringify(buildDataObject(), null, 2), "application/json");
+});
+
+// Recover notice: if a previous backup exists, inform the experimenter.
+(function checkBackup() {
+  try {
+    const last = localStorage.getItem("dualtask_mobile_last");
+    if (last && localStorage.getItem(last)) {
+      setMsg("A previous data backup was found in this browser (" + last +
+        "). It will be overwritten when a new session with the same ID/condition starts. " +
+        "Use the browser console to retrieve it if needed: localStorage.getItem('" + last + "').", "info");
+    }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
