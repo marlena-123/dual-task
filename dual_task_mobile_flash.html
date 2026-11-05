@@ -128,9 +128,25 @@
   #practiceFeedback { min-height: 28px; font-size: 20px; margin-top: 18px; color: #8a9099; }
   .cursor-hidden, .cursor-hidden * { cursor: none !important; }
 
-  /* Experimenter early-stop control (unobtrusive; does not count as a response) */
-  .stopbtn { position: fixed; top: 10px; right: 10px; z-index: 60; opacity: .22;
-       font-size: 12px; min-height: 0; padding: 6px 10px; margin: 0; }
+  /* Experimenter stop control (top-left; does not count as a response) */
+  .stopbtn { position: fixed; top: 10px; left: 10px; z-index: 60; opacity: .6;
+       font-size: 13px; min-height: 0; padding: 7px 12px; margin: 0; }
+  .stopbtn:hover { opacity: 1; }
+
+  /* ---- Stop-session menu (in-app modal; taps here do NOT reach the tap target) ---- */
+  #stopMenu {
+    position: fixed; inset: 0; z-index: 70; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.6);
+  }
+  #stopMenu.show { display: flex; }
+  #stopMenu .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 24px; max-width: 420px; width: calc(100% - 48px); text-align: center;
+  }
+  #stopMenu .panel h2 { color: var(--fg); text-transform: none; letter-spacing: 0;
+       font-size: 18px; margin: 0 0 16px; }
+  #stopMenu .panel button { display: block; width: 100%; margin: 10px 0 0; }
 
   /* ---- Full-screen colour FLASH feedback on each registered tap ---- */
   #flashOverlay {
@@ -157,43 +173,75 @@
 <div id="setupScreen" class="screen active">
   <div class="wrap">
     <h1>Dual-Task Auditory Probe &mdash; Mobile Setup</h1>
-    <p class="sub">Experimenter screen. Configure, test the sound, run a practice block, then start the session. Participant <b>taps the screen</b> when they hear a tone.</p>
+    <p class="sub">Enter your participant code, select the condition, then the experimenter starts the session. You <b>tap the screen</b> whenever you hear a tone.</p>
+    <p class="hint" id="versionLine"></p>
 
     <div id="setupMsg" class="msg"></div>
 
+    <div class="explain">
+      <b>Your participant code</b>
+      <p style="margin:6px 0;">To match your data across the study securely and anonymously, please
+        create a personal participant code. Build it using <b>CAPITAL LETTERS</b> and
+        <b>two-digit numbers</b> (e.g. 05):</p>
+      <ul>
+        <li>The last <b>two letters</b> of your <b>father&rsquo;s</b> first name.</li>
+        <li>The <b>number of letters</b> in your <b>mother&rsquo;s</b> first name
+            (as a two-digit number, e.g. 05 or 10).</li>
+        <li>The <b>day</b> of your <b>birthday</b> (as a two-digit number, e.g. 05 or 23).</li>
+      </ul>
+      <p style="margin:6px 0;"><b>Example:</b> father ANTON &rarr; last two letters <b>ON</b>;
+        mother MARIA has 5 letters &rarr; <b>05</b>; birthday on the 9th &rarr; <b>09</b>.
+        Final participant code: <b>ON0509</b>.</p>
+    </div>
+
     <div class="row">
       <div>
-        <label for="pid">Participant ID</label>
-        <input type="text" id="pid" placeholder="e.g. P01" autocomplete="off" />
+        <label for="pid">Participant code</label>
+        <input type="text" id="pid" placeholder="e.g. ON0509" autocomplete="off" />
       </div>
       <div>
         <label for="condition">Condition</label>
         <select id="condition">
-          <option value="1 AI Agent">1 AI Agent</option>
-          <option value="3 AI Agents">3 AI Agents</option>
+          <option value="" selected>&mdash; select &mdash;</option>
+          <option value="1 Agent">1 Agent</option>
+          <option value="2 Agents">2 Agents</option>
         </select>
-      </div>
-      <div>
-        <label for="sessionMin">Session length (minutes)</label>
-        <input type="number" id="sessionMin" value="30" min="1" step="1" />
       </div>
     </div>
 
-    <fieldset id="advanced" class="collapsed">
-      <legend id="advLegend">&#9656; Advanced settings</legend>
+    <div class="btnbar" style="justify-content: space-between;">
+      <button id="btnTestSound">&#128266; Test sound</button>
+      <div>
+        <button id="btnPractice">Start practice</button>
+        <button id="btnStart" class="primary">Start session</button>
+      </div>
+    </div>
+    <p class="hint">Starting requires a tap (to unlock browser audio) and will try to go fullscreen.
+       Put participant's headphones on and set volume with &ldquo;Test sound&rdquo; first.</p>
+
+    <fieldset id="expOnly" class="collapsed">
+      <legend id="expLegend">&#9656; For experimenter only</legend>
       <div class="body">
+        <div class="btnbar" style="margin-top:12px;">
+          <button id="btnTimingCheck">Timing check (20 tones)</button>
+        </div>
+        <h2>Advanced settings</h2>
         <div class="row">
           <div>
+            <label for="sessionMin">Session length (minutes)</label>
+            <input type="number" id="sessionMin" value="20" min="1" step="1" />
+          </div>
+          <div>
             <label for="isiMin">ISI min (s)</label>
-            <input type="number" id="isiMin" value="15" min="1" step="0.5" />
+            <input type="number" id="isiMin" value="5" min="1" step="0.5" />
           </div>
           <div>
             <label for="isiMax">ISI max (s)</label>
-            <input type="number" id="isiMax" value="45" min="1" step="0.5" />
+            <input type="number" id="isiMax" value="10" min="1" step="0.5" />
           </div>
           <div>
             <label for="firstDelay">First probe not before (s)</label>
-            <input type="number" id="firstDelay" value="30" min="0" step="1" />
+            <input type="number" id="firstDelay" value="10" min="0" step="1" />
           </div>
         </div>
         <div class="row">
@@ -207,28 +255,30 @@
           </div>
           <div>
             <label for="respWin">Response window (ms)</label>
-            <input type="number" id="respWin" value="3000" min="500" step="100" />
+            <input type="number" id="respWin" value="2500" min="500" step="100" />
           </div>
           <div>
             <label for="volume">Volume (0&ndash;1)</label>
             <input type="number" id="volume" value="0.5" min="0" max="1" step="0.05" />
           </div>
         </div>
-        <p class="hint">Fade in/out is fixed at 10&nbsp;ms. Anticipation threshold fixed at 100&nbsp;ms.</p>
+        <p class="hint">Fade in/out is fixed at 10&nbsp;ms. A tap within 100&nbsp;ms of a tone is
+           too early to be a real reaction and is recorded as a false alarm.</p>
 
         <div class="explain">
           <b>What these settings mean</b>
           <ul>
+            <li><b>Session length (minutes)</b> &mdash; total run time. Default 20&nbsp;min.</li>
             <li><b>ISI min / max (s)</b> &mdash; the gap between tones. Each gap is picked at random
-                between these two values, so tones stay unpredictable. Default 15&ndash;45&nbsp;s.</li>
+                between these two values, so tones stay unpredictable. Default 5&ndash;10&nbsp;s.</li>
             <li><b>First probe not before (s)</b> &mdash; a quiet lead-in so the first tone does not
-                arrive immediately after the session starts. Default 30&nbsp;s.</li>
+                arrive immediately after the session starts. Default 10&nbsp;s.</li>
             <li><b>Tone frequency (Hz)</b> &mdash; the pitch of the beep. Higher = higher pitch.
                 Default 1000&nbsp;Hz (a clear mid tone).</li>
             <li><b>Tone duration (ms)</b> &mdash; how long each beep lasts. Default 150&nbsp;ms
                 (a short beep).</li>
             <li><b>Response window (ms)</b> &mdash; how long after a tone a TAP still counts
-                as a reaction to it. After this, it is scored as a miss. Default 3000&nbsp;ms (3&nbsp;s).</li>
+                as a reaction to it. After this, it is scored as a miss. Default 2500&nbsp;ms (2.5&nbsp;s).</li>
             <li><b>Volume (0&ndash;1)</b> &mdash; loudness of the tone, 0 = silent, 1 = loudest.
                 Set this once with &ldquo;Test sound&rdquo; and keep it the same for everyone.</li>
           </ul>
@@ -236,21 +286,12 @@
         </div>
       </div>
     </fieldset>
-
-    <div class="btnbar">
-      <button id="btnTestSound">Test sound</button>
-      <button id="btnTimingCheck">Timing check (20 tones)</button>
-      <button id="btnPractice">Start practice</button>
-      <button id="btnStart" class="primary">Start session</button>
-    </div>
-    <p class="hint">Starting requires a tap (to unlock browser audio) and will try to go fullscreen.
-       Put participant's headphones on and set volume with &ldquo;Test sound&rdquo; first.</p>
   </div>
 </div>
 
 <!-- ======================= PRACTICE SCREEN (participant) ======================= -->
 <div id="practiceScreen" class="screen">
-  <button class="stopbtn" type="button">Stop</button>
+  <button class="stopbtn" type="button">Stop session</button>
   <div>
     <div class="instruction">Practice &mdash; <b>tap the screen</b> when you hear the tone.</div>
     <div class="fixation"></div>
@@ -260,7 +301,7 @@
 
 <!-- ======================= SESSION SCREEN (participant, nearly blank) ======================= -->
 <div id="sessionScreen" class="screen">
-  <button class="stopbtn" type="button">Stop</button>
+  <button class="stopbtn" type="button">Stop session</button>
   <div>
     <div class="instruction">Tap the screen when you hear the tone.</div>
     <div class="fixation"></div>
@@ -269,6 +310,15 @@
 
 <!-- Full-screen flash feedback overlay (shared by both screens) -->
 <div id="flashOverlay"></div>
+
+<!-- Stop-session menu (shown when the top-left Stop button is tapped in a real session) -->
+<div id="stopMenu">
+  <div class="panel">
+    <h2>Stop the session?</h2>
+    <button id="btnEndSession" class="primary" type="button">End the session (I am finished with the task)</button>
+    <button id="btnResumeSession" type="button">Resume the session (I need to continue)</button>
+  </div>
+</div>
 
 <!-- ======================= FINISHED SCREEN (participant sees thanks, experimenter opens summary) ======================= -->
 <div id="finishedScreen" class="screen">
@@ -286,6 +336,11 @@
     <textarea id="dataBox" readonly spellcheck="false"
       style="width:100%; min-height:160px; margin-top:6px; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:10px; font-family:monospace; font-size:12px; white-space:pre;"></textarea>
     <div id="summaryBox" style="display:none; text-align:left; margin-top:20px;"></div>
+    <div class="btnbar" style="justify-content:center; margin-top:24px;">
+      <button id="btnHome" class="primary">Go back to home screen</button>
+    </div>
+    <p class="hint">Use this to set up the next condition without reloading the app. Make sure you
+       have saved the data file first.</p>
   </div>
 </div>
 
@@ -295,18 +350,18 @@
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.1-mobile-flash";
+const APP_VERSION = "1.0.2-mobile-flash";
 
 const CONFIG = {
-  isiMinS: 15,          // inter-stimulus interval minimum (seconds)
-  isiMaxS: 45,          // inter-stimulus interval maximum (seconds)
-  firstDelayS: 30,      // first probe not before this many seconds
-  sessionMin: 30,       // session length (minutes)
+  isiMinS: 5,           // inter-stimulus interval minimum (seconds)
+  isiMaxS: 10,          // inter-stimulus interval maximum (seconds)
+  firstDelayS: 10,      // first probe not before this many seconds
+  sessionMin: 20,       // session length (minutes)
   toneHz: 1000,         // sine tone frequency (Hz)
   toneMs: 150,          // tone duration (ms)
   fadeMs: 10,           // fixed fade in/out (ms) to avoid clicks
-  respWindowMs: 3000,   // response window after onset (ms)
-  anticipationMs: 100,  // RT below this = anticipation (invalid)
+  respWindowMs: 2500,   // response window after onset (ms); taps after this = miss
+  anticipationMs: 100,  // RT below this = too early -> recorded as a false alarm
   volume: 0.5,          // peak gain (0..1)
   // Practice block:
   practiceCount: 4,     // number of practice probes (3-5)
@@ -539,7 +594,11 @@ function hideCursor(on) {
 async function startBlock(practice) {
   readConfigFromUI();
   if (!practice && !meta.participant_id) {
-    setMsg("Please enter a Participant ID before starting the session.", "err");
+    setMsg("Please enter a participant code before starting the session.", "err");
+    return;
+  }
+  if (!practice && !meta.condition) {
+    setMsg("Please select a condition before starting the session.", "err");
     return;
   }
   if (CONFIG.isiMinS > CONFIG.isiMaxS) {
@@ -673,9 +732,10 @@ function handleResponse(pressMs) {
     const probe = currentProbe;
     const rt = pressMs - probe.correctedOnsetMs;
     if (rt < CONFIG.anticipationMs) {
-      // Too fast to be a genuine response to this tone.
-      probe.responded = true; // first press counts; invalid anticipation
-      logTrial(probe, pressMs, "anticipation");
+      // Too early to be a genuine reaction to this tone: record a false alarm
+      // but leave the response window OPEN, so a later valid tap can still count
+      // as a hit (or the probe becomes a miss if no valid tap arrives).
+      recordFalseAlarm(pressMs);
       if (isPractice) showPracticeFeedback("Too early!");
     } else {
       probe.responded = true; // only first valid press per probe counts
@@ -684,21 +744,26 @@ function handleResponse(pressMs) {
     }
   } else {
     // Press outside any open window => false alarm.
-    const elapsed = pressMs - sessionStartPerf;
-    const rec = {
-      practice: isPractice,
-      response_timestamp_ms: pressMs,
-      session_elapsed_ms: elapsed,
-    };
-    if (isPractice) {
-      practiceTrials.push(makeTrialRow(null, rec, "false_alarm"));
-      showPracticeFeedback("No tone");
-    } else {
-      falseAlarms.push(rec);
-      trials.push(makeTrialRow(null, rec, "false_alarm"));
-    }
-    persistBackup();
+    recordFalseAlarm(pressMs);
+    if (isPractice) showPracticeFeedback("No tone");
   }
+}
+
+// Record a tap that is not a valid response to an open probe (either outside any
+// window, or too early after a tone) as a false alarm.
+function recordFalseAlarm(pressMs) {
+  const rec = {
+    practice: isPractice,
+    response_timestamp_ms: pressMs,
+    session_elapsed_ms: pressMs - sessionStartPerf,
+  };
+  if (isPractice) {
+    practiceTrials.push(makeTrialRow(null, rec, "false_alarm"));
+  } else {
+    falseAlarms.push(rec);
+    trials.push(makeTrialRow(null, rec, "false_alarm"));
+  }
+  persistBackup();
 }
 
 // Experimenter early-stop via keyboard (if a keyboard happens to be attached).
@@ -794,10 +859,14 @@ function clearTimers() {
 }
 
 function attemptEarlyStop() {
-  // Confirm before ending; data so far is saved either way.
-  const ok = window.confirm("Stop the session early?\nData collected so far will be saved.");
-  if (ok) endSession(true);
+  // Practice: a Stop just ends the practice block and returns to setup.
+  if (isPractice) { endPractice(); return; }
+  // Real session: open the in-app stop menu (End vs. Resume). The tone schedule
+  // keeps running underneath so session timing stays intact if they Resume.
+  $("stopMenu").classList.add("show");
 }
+
+function closeStopMenu() { $("stopMenu").classList.remove("show"); }
 
 function endPractice() {
   if (!running) return;
@@ -813,27 +882,55 @@ function endPractice() {
          " hits). Ready to start the session.", "info");
 }
 
-async function endSession(early) {
+function endSession(early) {
   running = false;
   clearTimers();
   hideCursor(false);
   disableBeforeUnload();
   releaseWakeLock();
-  try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
 
+  // IMPORTANT: persist the data, fill the copy box, and switch to the finished
+  // screen FIRST — before touching fullscreen or downloads. On iPad,
+  // document.exitFullscreen() returns a promise that can hang forever; awaiting
+  // it previously blocked everything after it, leaving the app stuck on the
+  // session screen with no data shown. Everything that could block now runs
+  // last, wrapped so it can never prevent the finished screen from appearing.
+  const csv = buildCSV();
   persistBackup();
-
-  // Auto-download CSV; offer JSON via button.
-  const fname = buildFileBase();
-  downloadFile(fname + ".csv", buildCSV(), "text/csv");
-
-  // Always fill the on-screen copy box so data is retrievable even if every
-  // download/share path fails on this device.
-  $("dataBox").value = buildCSV();
-
-  // Prepare finished screen.
+  $("dataBox").value = csv;
   renderFinished(early);
   showScreen("finishedScreen");
+
+  // Exit fullscreen WITHOUT awaiting (fire-and-forget; may hang on iPad).
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  } catch (e) { /* non-fatal */ }
+
+  // Best-effort auto-download; its failure must not affect the screen or data.
+  try { downloadFile(buildFileBase() + ".csv", csv, "text/csv"); } catch (e) { /* non-fatal */ }
+}
+
+// Return to the setup screen to run the next condition without reloading the app.
+// Confirms the data was saved first, then clears this run's data and resets the
+// condition (so the next one is picked deliberately); keeps the participant code.
+function goHome() {
+  const ok = window.confirm(
+    "Have you saved the data file (Share CSV / JSON)?\n\n" +
+    "Going back clears this screen and cannot be undone.");
+  if (!ok) return;
+  trials = [];
+  practiceTrials = [];
+  falseAlarms = [];
+  schedule = [];
+  $("dataBox").value = "";
+  const sb = $("summaryBox");
+  sb.style.display = "none";
+  sb.innerHTML = "";
+  $("condition").value = "";
+  showScreen("setupScreen");
+  setMsg("Data cleared from the screen. For a second condition, select the condition and start again.", "info");
 }
 
 /* ===========================================================================
@@ -964,7 +1061,6 @@ function renderSummaryTable() {
     '<tr><th>Probes scheduled</th><td>' + s.probes + '</td></tr>' +
     '<tr><th>Hits</th><td>' + s.hits + '</td></tr>' +
     '<tr><th>Misses</th><td>' + s.misses + '</td></tr>' +
-    '<tr><th>Anticipations (invalid)</th><td>' + s.anticipations + '</td></tr>' +
     '<tr><th>False alarms</th><td>' + s.falseAlarms + '</td></tr>' +
     '<tr><th>Mean RT (hits)</th><td>' + fmt(s.meanRt) + ' ms</td></tr>' +
     '<tr><th>Median RT (hits)</th><td>' + fmt(s.medianRt) + ' ms</td></tr>' +
@@ -1043,12 +1139,25 @@ document.querySelectorAll(".stopbtn").forEach((b) =>
   b.addEventListener("click", () => { if (running) attemptEarlyStop(); }));
 document.addEventListener("keydown", onKeyDown, true);
 
-// Advanced settings collapse/expand.
-$("advLegend").addEventListener("click", () => {
-  const fs = $("advanced");
-  fs.classList.toggle("collapsed");
-  $("advLegend").innerHTML = (fs.classList.contains("collapsed") ? "&#9656;" : "&#9662;") + " Advanced settings";
+// "For experimenter only" section: password-gated collapse/expand (password 0000).
+// Soft protection only (stops participants fiddling; not real security).
+$("expLegend").addEventListener("click", () => {
+  const fs = $("expOnly");
+  if (fs.classList.contains("collapsed")) {
+    const pw = window.prompt("Enter experimenter password:");
+    if (pw === null) return;                 // cancelled
+    if (pw !== "0000") { setMsg("Incorrect experimenter password.", "err"); return; }
+    fs.classList.remove("collapsed");
+    $("expLegend").innerHTML = "&#9662; For experimenter only";
+  } else {
+    fs.classList.add("collapsed");
+    $("expLegend").innerHTML = "&#9656; For experimenter only";
+  }
 });
+
+// Stop-session menu buttons.
+$("btnEndSession").addEventListener("click", () => { closeStopMenu(); endSession(true); });
+$("btnResumeSession").addEventListener("click", closeStopMenu);
 
 // Test sound: plays one tone ~100 ms in the future so the experimenter can set volume.
 $("btnTestSound").addEventListener("click", () => {
@@ -1076,6 +1185,10 @@ $("btnDownloadCsv").addEventListener("click", () => {
 $("btnDownloadJson").addEventListener("click", () => {
   downloadFile(buildFileBase() + ".json", JSON.stringify(buildDataObject(), null, 2), "application/json");
 });
+$("btnHome").addEventListener("click", goHome);
+
+// Show the running build version on the setup screen.
+$("versionLine").textContent = "App version " + APP_VERSION;
 
 // Recover notice: if a previous backup exists, inform the experimenter.
 (function checkBackup() {
