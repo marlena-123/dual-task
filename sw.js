@@ -6,7 +6,7 @@
    ============================================================================ */
 "use strict";
 
-const CACHE_VERSION = "dualtask-flash-v5";
+const CACHE_VERSION = "dualtask-flash-v6";
 
 // All paths relative to this file's location (scope "./").
 const PRECACHE_URLS = [

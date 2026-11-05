@@ -171,7 +171,7 @@
 <body>
 
 <!-- ======================= SETUP SCREEN (experimenter) ======================= -->
-<div id="setupScreen" class="screen active">
+<div id="setupScreen" class="screen activeWrite">
   <div class="wrap">
     <h1>Dual-Task</h1>
     <p class="sub">Enter your participant code and test the sound. When you are told to do so, please start the Test Session. You <b>tap the screen</b> whenever you hear a tone.</p>
@@ -256,7 +256,7 @@
           </div>
           <div>
             <label for="respWin">Response window (ms)</label>
-            <input type="number" id="respWin" value="2500" min="500" step="100" />
+            <input type="number" id="respWin" value="4000" min="500" step="100" />
           </div>
           <div>
             <label for="volume">Volume (0&ndash;1)</label>
@@ -326,16 +326,15 @@
 <div id="finishedScreen" class="screen">
   <div class="wrap big-center">
     <h1>Session finished</h1>
-    <p class="sub">You finished this condition. Save the CSV file now: tap <b>Share CSV</b> &rarr; <b>Save to Files</b> (recommended), or <b>Download CSV</b>.</p>
-    <p class="sub"><b>Then check the file actually saved:</b> open the iPad's <b>Files</b> app and confirm the CSV is there &mdash; <b>Download CSV</b> saves into the <b>Downloads</b> folder. Only go back once you have confirmed the file is in the iPad's local files.</p>
+    <p class="sub">You finished this condition. You should already have saved the CSV file in the previous step.</p>
+    <p class="sub"><b>Please check that the file was saved in the Downloads folder</b> (open the iPad's <b>Files</b> app). If there were any issues, save it again using <b>Share CSV</b> &rarr; <b>Save to Files</b>. Once you have confirmed the CSV is saved, go back to the home screen using the button on the right.</p>
     <div class="btnbar" style="justify-content:center;">
       <button id="btnShareCsv" class="primary">Share CSV</button>
       <button id="btnDownloadCsv">Download CSV</button>
     </div>
-    <div class="btnbar" style="justify-content:center; margin-top:24px;">
+    <div class="btnbar" style="justify-content:flex-end; margin-top:24px;">
       <button id="btnHome" class="primary">Go back to home screen</button>
     </div>
-    <p class="hint">Make sure you have saved the data file first.</p>
 
     <fieldset id="expOnlyFin" class="collapsed">
       <legend id="expLegendFin">&#9656; For experimenter only</legend>
@@ -355,7 +354,7 @@
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.4-mobile-flash";
+const APP_VERSION = "1.0.5-mobile-flash";
 
 const CONFIG = {
   isiMinS: 5,           // inter-stimulus interval minimum (seconds)
@@ -365,7 +364,7 @@ const CONFIG = {
   toneHz: 1000,         // sine tone frequency (Hz)
   toneMs: 150,          // tone duration (ms)
   fadeMs: 10,           // fixed fade in/out (ms) to avoid clicks
-  respWindowMs: 2500,   // response window after onset (ms); taps after this = miss
+  respWindowMs: 4000,   // response window after onset (ms); taps after this = miss
   anticipationMs: 100,  // RT below this = too early -> recorded as a false alarm
   volume: 0.5,          // peak gain (0..1)
   // Practice block:
