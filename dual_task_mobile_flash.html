@@ -128,10 +128,11 @@
   #practiceFeedback { min-height: 28px; font-size: 20px; margin-top: 18px; color: #8a9099; }
   .cursor-hidden, .cursor-hidden * { cursor: none !important; }
 
-  /* Experimenter stop control (top-left; does not count as a response) */
-  .stopbtn { position: fixed; top: 10px; left: 10px; z-index: 60; opacity: .6;
-       font-size: 13px; min-height: 0; padding: 7px 12px; margin: 0; }
-  .stopbtn:hover { opacity: 1; }
+  /* Stop control (top-right; clearly visible; does not count as a response) */
+  .stopbtn { position: fixed; top: 12px; right: 12px; z-index: 60; opacity: 1;
+       font-size: 14px; font-weight: 600; min-height: 0; padding: 9px 16px; margin: 0;
+       background: var(--panel); border: 1px solid var(--danger); color: var(--danger); }
+  .stopbtn:hover { background: var(--danger); color: #fff; }
 
   /* ---- Stop-session menu (in-app modal; taps here do NOT reach the tap target) ---- */
   #stopMenu {
@@ -172,8 +173,8 @@
 <!-- ======================= SETUP SCREEN (experimenter) ======================= -->
 <div id="setupScreen" class="screen active">
   <div class="wrap">
-    <h1>Dual-Task Auditory Probe &mdash; Mobile Setup</h1>
-    <p class="sub">Enter your participant code, select the condition, then the experimenter starts the session. You <b>tap the screen</b> whenever you hear a tone.</p>
+    <h1>Dual-Task</h1>
+    <p class="sub">Enter your participant code and test the sound. When you are told to do so, please start the Test Session. You <b>tap the screen</b> whenever you hear a tone.</p>
     <p class="hint" id="versionLine"></p>
 
     <div id="setupMsg" class="msg"></div>
@@ -311,35 +312,34 @@
 <!-- Full-screen flash feedback overlay (shared by both screens) -->
 <div id="flashOverlay"></div>
 
-<!-- Stop-session menu (shown when the top-left Stop button is tapped in a real session) -->
+<!-- Stop-session menu (shown when the top-right Stop button is tapped in a real session;
+     the session is paused while this is open) -->
 <div id="stopMenu">
   <div class="panel">
-    <h2>Stop the session?</h2>
-    <button id="btnEndSession" class="primary" type="button">End the session (I am finished with the task)</button>
-    <button id="btnResumeSession" type="button">Resume the session (I need to continue)</button>
+    <h2>Session paused</h2>
+    <button id="btnResumeSession" class="primary" type="button">Resume the session (I need to continue)</button>
+    <button id="btnEndSession" type="button">End the session (I am finished with the task)</button>
   </div>
 </div>
 
 <!-- ======================= FINISHED SCREEN (participant sees thanks, experimenter opens summary) ======================= -->
 <div id="finishedScreen" class="screen">
   <div class="wrap big-center">
-    <h1>Session finished &mdash; thank you!</h1>
-    <p class="sub">You can take off the headphones. The experimenter will continue.</p>
+    <h1>Session finished</h1>
+    <p class="sub">You finished this condition. Please download the CSV file. Once you did that, go back to home screen for the second condition.</p>
     <div class="btnbar" style="justify-content:center;">
       <button id="btnShareCsv" class="primary">Share CSV</button>
-      <button id="btnShareJson">Share data (JSON)</button>
-      <button id="btnShowSummary">Show summary</button>
       <button id="btnDownloadCsv">Download CSV</button>
-      <button id="btnDownloadJson">Download JSON</button>
+      <button id="btnShowSummary">Show summary</button>
     </div>
-    <p class="hint" style="margin-top:14px;">If Share and Download don't work on this device, copy the CSV below (tap in the box, Select All, Copy):</p>
+    <p class="hint" style="margin-top:14px;">If Share and Download don't work on this device, copy the CSV below (tap in the box, Select All, Copy). If there is no data in this field please contact an experimenter.</p>
     <textarea id="dataBox" readonly spellcheck="false"
       style="width:100%; min-height:160px; margin-top:6px; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:10px; font-family:monospace; font-size:12px; white-space:pre;"></textarea>
     <div id="summaryBox" style="display:none; text-align:left; margin-top:20px;"></div>
     <div class="btnbar" style="justify-content:center; margin-top:24px;">
       <button id="btnHome" class="primary">Go back to home screen</button>
     </div>
-    <p class="hint">Use this to set up the next condition without reloading the app. Make sure you
+    <p class="hint">Make sure you
        have saved the data file first.</p>
   </div>
 </div>
@@ -350,7 +350,7 @@
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.2-mobile-flash";
+const APP_VERSION = "1.0.3-mobile-flash";
 
 const CONFIG = {
   isiMinS: 5,           // inter-stimulus interval minimum (seconds)
@@ -393,6 +393,9 @@ let sessionTimers = [];           // pending setTimeout ids (for cleanup)
 let sessionEndTimer = null;
 let meta = {};                    // participant/condition/settings snapshot
 let beforeUnloadActive = false;
+let paused = false;               // true while a real session is paused (toilet break etc.)
+let pausedElapsedMs = 0;          // session time already elapsed at the moment of pausing
+let scheduledOscs = [];           // oscillators scheduled ahead, so a pause/stop can cancel them
 
 /* ===========================================================================
    SMALL HELPERS
@@ -488,7 +491,15 @@ function scheduleTone(when) {
   osc.connect(gain).connect(ctx.destination);
   osc.start(when);
   osc.stop(when + dur + 0.02);
+  scheduledOscs.push(osc); // track so pause / early-stop can cancel pending beeps
   return { when };
+}
+
+// Cancel every tone scheduled ahead (used on pause and when ending a session, so
+// no further beeps play once the participant stops or takes a break).
+function stopAllScheduledTones() {
+  scheduledOscs.forEach((osc) => { try { osc.stop(); osc.disconnect(); } catch (e) { /* already done */ } });
+  scheduledOscs = [];
 }
 
 // Convert an AudioContext time (seconds) to the performance.now() timeline (ms).
@@ -642,47 +653,48 @@ async function startBlock(practice) {
   showScreen(practice ? "practiceScreen" : "sessionScreen");
   if (practice) $("practiceFeedback").textContent = "";
 
-  // Anchor the two clocks at start.
-  sessionStartCtx = audioCtx.currentTime;
-  sessionStartPerf = performance.now();
-  // Give a small lead so the first scheduled tone is comfortably in the future.
-  const startCtx = sessionStartCtx + 0.2;
+  paused = false;
+  pausedElapsedMs = 0;
+  armSession(0);
+}
 
-  // Schedule every tone on the audio clock and arm response-window logic.
+// (Re)schedule all not-yet-elapsed tones, their response windows, and the end
+// timer, measured from a given amount of already-elapsed session time. Called at
+// start (elapsedMs = 0) and again on resume after a pause (elapsedMs = time run
+// so far). Re-anchoring the clocks this way makes recorded onsets and elapsed
+// times EXCLUDE any paused break.
+function armSession(elapsedMs) {
+  const nowCtx = audioCtx.currentTime;
+  const lead = 0.2; // small scheduling lead (s) so the next tone is safely in the future
+  sessionStartCtx = nowCtx - elapsedMs / 1000;
+  sessionStartPerf = performance.now() - elapsedMs;
+
   schedule.forEach((probe) => {
-    const whenCtx = startCtx + probe.onsetS;
+    const delayMs = probe.onsetS * 1000 - elapsedMs;
+    if (delayMs <= 0) return; // this tone already happened before this (re)arm
+    const whenCtx = nowCtx + lead + delayMs / 1000;
     probe.whenCtx = whenCtx;
-
-    // 1) schedule the actual audio
     scheduleTone(whenCtx);
-
-    // 2) arm response window just before onset using a setTimeout driven by
-    //    the perf clock. The *timing* of the tone comes from the audio clock;
-    //    this timeout only flips bookkeeping flags, it does not play sound.
-    const onsetPerfApprox = sessionStartPerf + (whenCtx - sessionStartCtx) * 1000;
-    const armDelay = Math.max(0, onsetPerfApprox - performance.now());
+    const armDelay = lead * 1000 + delayMs;
     sessionTimers.push(setTimeout(() => openProbe(probe), armDelay));
     sessionTimers.push(setTimeout(() => closeProbe(probe), armDelay + CONFIG.respWindowMs));
   });
 
-  // Schedule session end (main session only) a bit after the last window closes.
-  if (!practice) {
-    const lastOnsetS = schedule.length ? schedule[schedule.length - 1].onsetS : 0;
-    const endDelayMs = Math.max(CONFIG.sessionMin * 60 * 1000,
-                                (lastOnsetS * 1000) + CONFIG.respWindowMs) + 500;
-    sessionEndTimer = setTimeout(() => endSession(false), endDelayMs);
+  const lastOnsetS = schedule.length ? schedule[schedule.length - 1].onsetS : 0;
+  if (!isPractice) {
+    const endAtMs = Math.max(CONFIG.sessionMin * 60 * 1000,
+                             (lastOnsetS * 1000) + CONFIG.respWindowMs) + 500;
+    sessionEndTimer = setTimeout(() => endSession(false), lead * 1000 + Math.max(0, endAtMs - elapsedMs));
   } else {
-    // End practice shortly after last window.
-    const lastOnsetS = schedule.length ? schedule[schedule.length - 1].onsetS : 0;
-    const endDelayMs = (lastOnsetS * 1000) + CONFIG.respWindowMs + 1200;
-    sessionEndTimer = setTimeout(() => endPractice(), endDelayMs);
+    const endAtMs = (lastOnsetS * 1000) + CONFIG.respWindowMs + 1200;
+    sessionEndTimer = setTimeout(() => endPractice(), lead * 1000 + Math.max(0, endAtMs - elapsedMs));
   }
 }
 
 // Called at (approx) tone onset: record precise onset from the audio clock,
 // open the response window.
 function openProbe(probe) {
-  if (!running) return;
+  if (!running || paused) return;
   const t = ctxTimeToPerfMs(probe.whenCtx);
   probe.scheduledOnsetMs = t.scheduledPerfMs; // raw context->perf mapping
   probe.correctedOnsetMs = t.correctedPerfMs; // + output latency
@@ -695,10 +707,10 @@ function openProbe(probe) {
 
 // Called at end of response window: if no valid press, log a miss.
 function closeProbe(probe) {
-  if (!running) return;
+  if (!running || paused) return;
   if (!probe.responded) {
     logTrial(probe, null, "miss");
-    if (isPractice) showPracticeFeedback("Miss");
+    if (isPractice) showPracticeFeedback("Too late");
   }
   if (currentProbe === probe) {
     probeWindowOpen = false;
@@ -718,7 +730,7 @@ function onResponseTap(e) {
   const pressMs = performance.now();
   if (e.target.closest(".stopbtn")) return;
   e.preventDefault();          // block scrolling / double-tap zoom / synthetic click
-  if (!running) return;
+  if (!running || paused) return;
   ensureAudio();               // keep the audio context alive on mobile
   handleResponse(pressMs);     // performance.now() timeline (matches onset times)
 }
@@ -740,7 +752,7 @@ function handleResponse(pressMs) {
     } else {
       probe.responded = true; // only first valid press per probe counts
       logTrial(probe, pressMs, "hit");
-      if (isPractice) showPracticeFeedback(rt.toFixed(0) + " ms");
+      if (isPractice) showPracticeFeedback("Correct");
     }
   } else {
     // Press outside any open window => false alarm.
@@ -861,17 +873,41 @@ function clearTimers() {
 function attemptEarlyStop() {
   // Practice: a Stop just ends the practice block and returns to setup.
   if (isPractice) { endPractice(); return; }
-  // Real session: open the in-app stop menu (End vs. Resume). The tone schedule
-  // keeps running underneath so session timing stays intact if they Resume.
+  // Real session: PAUSE immediately (stop beeps + recording) and open the menu
+  // so the participant can Resume (e.g. after a toilet break) or End completely.
+  pauseSession();
   $("stopMenu").classList.add("show");
 }
 
 function closeStopMenu() { $("stopMenu").classList.remove("show"); }
 
+// Pause a running real session: cancel pending beeps and response windows and
+// remember how far into the session we are. No data is recorded while paused.
+function pauseSession() {
+  if (!running || isPractice || paused) return;
+  paused = true;
+  pausedElapsedMs = performance.now() - sessionStartPerf;
+  clearTimers();
+  stopAllScheduledTones();
+  // Drop any response window that happened to be open at the moment of pausing.
+  probeWindowOpen = false;
+  currentProbe = null;
+}
+
+// Resume a paused session: re-schedule the remaining tones from where we left
+// off. Paused time is excluded from the recorded session clock.
+function resumeSession() {
+  if (!paused) return;
+  paused = false;
+  armSession(pausedElapsedMs);
+}
+
 function endPractice() {
   if (!running) return;
   running = false;
+  paused = false;
   clearTimers();
+  stopAllScheduledTones();
   hideCursor(false);
   disableBeforeUnload();
   releaseWakeLock();
@@ -884,7 +920,9 @@ function endPractice() {
 
 function endSession(early) {
   running = false;
+  paused = false;
   clearTimers();
+  stopAllScheduledTones();
   hideCursor(false);
   disableBeforeUnload();
   releaseWakeLock();
@@ -917,7 +955,7 @@ function endSession(early) {
 // condition (so the next one is picked deliberately); keeps the participant code.
 function goHome() {
   const ok = window.confirm(
-    "Have you saved the data file (Share CSV / JSON)?\n\n" +
+    "Have you saved the data file (Share or Download CSV)?\n\n" +
     "Going back clears this screen and cannot be undone.");
   if (!ok) return;
   trials = [];
@@ -1157,7 +1195,7 @@ $("expLegend").addEventListener("click", () => {
 
 // Stop-session menu buttons.
 $("btnEndSession").addEventListener("click", () => { closeStopMenu(); endSession(true); });
-$("btnResumeSession").addEventListener("click", closeStopMenu);
+$("btnResumeSession").addEventListener("click", () => { closeStopMenu(); resumeSession(); });
 
 // Test sound: plays one tone ~100 ms in the future so the experimenter can set volume.
 $("btnTestSound").addEventListener("click", () => {
@@ -1175,16 +1213,10 @@ $("btnStart").addEventListener("click", () => { clearMsg(); startBlock(false); }
 $("btnShareCsv").addEventListener("click", () => {
   shareData(buildFileBase() + ".csv", buildCSV(), "text/csv");
 });
-$("btnShareJson").addEventListener("click", () => {
-  shareData(buildFileBase() + ".json", JSON.stringify(buildDataObject(), null, 2), "application/json");
-});
-$("btnShowSummary").addEventListener("click", renderSummaryTable);
 $("btnDownloadCsv").addEventListener("click", () => {
   downloadFile(buildFileBase() + ".csv", buildCSV(), "text/csv");
 });
-$("btnDownloadJson").addEventListener("click", () => {
-  downloadFile(buildFileBase() + ".json", JSON.stringify(buildDataObject(), null, 2), "application/json");
-});
+$("btnShowSummary").addEventListener("click", renderSummaryTable);
 $("btnHome").addEventListener("click", goHome);
 
 // Show the running build version on the setup screen.
