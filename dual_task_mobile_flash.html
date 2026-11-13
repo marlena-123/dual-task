@@ -226,11 +226,27 @@
         <div class="btnbar" style="margin-top:12px;">
           <button id="btnTimingCheck">Timing check (20 tones)</button>
         </div>
+
+        <h2>Recover saved data</h2>
+        <p class="hint">Every session is auto-backed-up in this browser after each tap. If a
+           session's Share/Download failed, pick it here and export it again.</p>
+        <div class="row">
+          <div style="flex: 1 1 100%;">
+            <label for="recoverSelect">Saved sessions on this device</label>
+            <select id="recoverSelect"></select>
+          </div>
+        </div>
+        <div class="btnbar">
+          <button id="btnRecoverShare" class="primary">Share recovered CSV</button>
+          <button id="btnRecoverDownload">Download recovered CSV</button>
+          <button id="btnRecoverRefresh">Refresh list</button>
+        </div>
+
         <h2>Advanced settings</h2>
         <div class="row">
           <div>
             <label for="sessionMin">Session length (minutes)</label>
-            <input type="number" id="sessionMin" value="20" min="1" step="1" />
+            <input type="number" id="sessionMin" value="15" min="1" step="1" />
           </div>
           <div>
             <label for="isiMin">ISI min (s)</label>
@@ -269,7 +285,7 @@
         <div class="explain">
           <b>What these settings mean</b>
           <ul>
-            <li><b>Session length (minutes)</b> &mdash; total run time. Default 20&nbsp;min.</li>
+            <li><b>Session length (minutes)</b> &mdash; total run time. Default 15&nbsp;min.</li>
             <li><b>ISI min / max (s)</b> &mdash; the gap between tones. Each gap is picked at random
                 between these two values, so tones stay unpredictable. Default 5&ndash;10&nbsp;s.</li>
             <li><b>First probe not before (s)</b> &mdash; a quiet lead-in so the first tone does not
@@ -412,13 +428,13 @@
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.9-mobile-flash";
+const APP_VERSION = "1.0.11-mobile-flash";
 
 const CONFIG = {
   isiMinS: 5,           // inter-stimulus interval minimum (seconds)
   isiMaxS: 10,          // inter-stimulus interval maximum (seconds)
   firstDelayS: 10,      // first probe not before this many seconds
-  sessionMin: 20,       // session length (minutes)
+  sessionMin: 15,       // session length (minutes)
   toneHz: 1000,         // sine tone frequency (Hz)
   toneMs: 150,          // tone duration (ms)
   fadeMs: 10,           // fixed fade in/out (ms) to avoid clicks
@@ -1114,6 +1130,69 @@ function buildCSV() {
   return rows.join("\r\n");
 }
 
+/* ===========================================================================
+   RECOVERY (experimenter) — rebuild a CSV from a localStorage backup so a
+   session whose Share/Download failed can still be exported later.
+   =========================================================================== */
+// Build the same CSV as buildCSV(), but from a stored backup object instead of
+// the in-memory trials (practice rows first, then main, matching buildCSV).
+function csvFromData(data) {
+  const rows = [CSV_COLUMNS.join(",")];
+  const all = (data.practice_trials || []).concat(data.trials || []);
+  all.forEach((r) => rows.push(CSV_COLUMNS.map((c) => csvEscape(r[c])).join(",")));
+  return rows.join("\r\n");
+}
+
+// Filename for a recovered export: participant / condition + the backup's own
+// save time (falls back to now), tagged "recovered".
+function recoverFileBase(data, key) {
+  const m = data.meta || {};
+  const pid = (m.participant_id || "unknown").replace(/[^\w\-]+/g, "_");
+  const cond = (m.condition || "").replace(/[^\w\-]+/g, "_");
+  const d = data.exported_at ? new Date(data.exported_at) : new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" +
+                p(d.getHours()) + p(d.getMinutes());
+  return (pid + "_" + cond + "_recovered_" + stamp);
+}
+
+// Fill the recovery dropdown with every backup found in localStorage, labelled
+// with participant / condition / trial counts so the right one is easy to pick.
+function populateRecoverSelect() {
+  const sel = $("recoverSelect");
+  if (!sel) return;
+  sel.innerHTML = "";
+  let keys = [];
+  try {
+    keys = Object.keys(localStorage).filter((k) => k.indexOf("dualtask_mobile_backup_") === 0);
+  } catch (e) { /* storage disabled */ }
+  if (!keys.length) {
+    const opt = document.createElement("option");
+    opt.value = ""; opt.textContent = "— no saved sessions found —";
+    sel.appendChild(opt);
+    return;
+  }
+  keys.forEach((k) => {
+    let label = k;
+    try {
+      const o = JSON.parse(localStorage.getItem(k));
+      const m = o.meta || {};
+      label = (m.participant_id || "(no id)") + " / " + (m.condition || "(no condition)") +
+              " — " + (o.trials || []).length + " trials, " +
+              (o.practice_trials || []).length + " practice";
+    } catch (e) { /* keep raw key as label */ }
+    const opt = document.createElement("option");
+    opt.value = k; opt.textContent = label;
+    sel.appendChild(opt);
+  });
+}
+
+function recoverSelectedData() {
+  const key = $("recoverSelect").value;
+  if (!key) return null;
+  try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
+}
+
 function downloadFile(name, content, mime) {
   const blob = new Blob([content], { type: mime + ";charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -1279,10 +1358,24 @@ $("expLegend").addEventListener("click", () => {
     if (pw !== "0000") { setMsg("Incorrect experimenter password.", "err"); return; }
     fs.classList.remove("collapsed");
     $("expLegend").innerHTML = "&#9662; For experimenter only";
+    populateRecoverSelect(); // refresh the recovery list each time it's opened
   } else {
     fs.classList.add("collapsed");
     $("expLegend").innerHTML = "&#9656; For experimenter only";
   }
+});
+
+// Recovery (experimenter): re-export a saved backup as CSV.
+$("btnRecoverRefresh").addEventListener("click", populateRecoverSelect);
+$("btnRecoverShare").addEventListener("click", () => {
+  const data = recoverSelectedData();
+  if (!data) { setMsg("No saved session selected to recover.", "err"); return; }
+  shareData(recoverFileBase(data, $("recoverSelect").value) + ".csv", csvFromData(data), "text/csv");
+});
+$("btnRecoverDownload").addEventListener("click", () => {
+  const data = recoverSelectedData();
+  if (!data) { setMsg("No saved session selected to recover.", "err"); return; }
+  downloadFile(recoverFileBase(data, $("recoverSelect").value) + ".csv", csvFromData(data), "text/csv");
 });
 
 // Stop-session menu buttons.
