@@ -290,6 +290,31 @@
   </div>
 </div>
 
+<!-- ============ START REMINDER (participant; shown when "Start session" is tapped) ============ -->
+<div id="startReminderScreen" class="screen">
+  <div class="wrap big-center">
+    <h1>Before you begin</h1>
+    <p class="sub" style="font-size:20px;">Please do the <b>coding task</b> <b>at the same time</b>
+       as the reaction task (tap the screen whenever you hear a tone).</p>
+    <p class="sub">If you are unsure what this means, go back to the <b>Questionnaire</b> and follow
+       the instructions there, or ask an experimenter.</p>
+    <div class="btnbar" style="justify-content:center; margin-top:28px;">
+      <button id="btnBeginSession" class="primary">Begin</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PRACTICE DONE (participant banner shown when practice ends) ============ -->
+<div id="practiceDoneScreen" class="screen">
+  <div class="wrap big-center">
+    <h1>Good job! You finished the practice run.</h1>
+    <p class="sub" style="font-size:20px;">Go back to the <b>Questionnaire</b> now!</p>
+    <div class="btnbar" style="justify-content:center; margin-top:28px;">
+      <button id="btnPracticeContinue">Continue</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= PRACTICE SCREEN (participant) ======================= -->
 <div id="practiceScreen" class="screen">
   <button class="stopbtn" type="button">Stop session</button>
@@ -322,18 +347,33 @@
   </div>
 </div>
 
-<!-- ======================= FINISHED SCREEN (participant sees thanks, experimenter opens summary) ======================= -->
+<!-- ======================= DONE SCREEN (participant; natural 20-min finish only, plays the alarm) ======================= -->
+<div id="doneScreen" class="screen">
+  <div class="wrap big-center">
+    <h1>You have finished the reaction task.</h1>
+    <p class="sub" style="font-size:20px;">Please <b>stop the coding task</b> now.</p>
+    <p class="sub">On the next screen you will save your data file &mdash; follow the instructions
+       in the <b>Questionnaire</b>.</p>
+    <div class="btnbar" style="justify-content:center; margin-top:28px;">
+      <button id="btnDoneNext" class="primary">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= SAVE / DOWNLOAD SCREEN (participant saves CSV; experimenter opens summary) ======================= -->
 <div id="finishedScreen" class="screen">
   <div class="wrap big-center">
-    <h1>Session finished</h1>
-    <p class="sub">You finished this condition. You should already have saved the CSV file in the previous step.</p>
-    <p class="sub"><b>Please check that the file was saved in the Downloads folder</b> (open the iPad's <b>Files</b> app). If there were any issues, save it again using <b>Share CSV</b> &rarr; <b>Save to Files</b>. Once you have confirmed the CSV is saved, go back to the home screen using the button on the right.</p>
+    <h1>Save your data</h1>
+    <p class="sub">Save your data file now: tap <b>Share CSV</b> &rarr; <b>Save to Files</b>
+       (recommended), or use <b>Download CSV</b>. Follow the instructions in the <b>Questionnaire</b>.</p>
+    <p class="hint">On Download the raw CSV may fill the screen &mdash; that is expected; use the
+       browser back arrow to return to the app.</p>
     <div class="btnbar" style="justify-content:center;">
       <button id="btnShareCsv" class="primary">Share CSV</button>
       <button id="btnDownloadCsv">Download CSV</button>
     </div>
     <div class="btnbar" style="justify-content:flex-end; margin-top:24px;">
-      <button id="btnHome" class="primary">Go back to home screen</button>
+      <button id="btnFinishedNext" class="primary">Next</button>
     </div>
 
     <fieldset id="expOnlyFin" class="collapsed">
@@ -348,13 +388,31 @@
   </div>
 </div>
 
+<!-- ======================= SAVED-CHECK SCREEN (participant confirms the file saved, then goes home) ======================= -->
+<div id="savedCheckScreen" class="screen">
+  <div class="wrap big-center">
+    <h1>Check your data was saved</h1>
+    <p class="sub">Open the <b>Dateien</b> app and go to <b>Verlauf</b> &mdash; you should see your
+       saved file there.</p>
+    <p class="sub">If you cannot find it, save it again using the buttons below. If there are still
+       any problems, ask an experimenter.</p>
+    <div class="btnbar" style="justify-content:center;">
+      <button id="btnShareCsv2">Share CSV again</button>
+      <button id="btnDownloadCsv2">Download CSV again</button>
+    </div>
+    <div class="btnbar" style="justify-content:center; margin-top:24px;">
+      <button id="btnHome2" class="primary">Go back to home screen</button>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 
 /* ===========================================================================
    CONFIG  (all tunable values in one place; advanced UI overrides these)
    =========================================================================== */
-const APP_VERSION = "1.0.7-mobile-flash";
+const APP_VERSION = "1.0.9-mobile-flash";
 
 const CONFIG = {
   isiMinS: 5,           // inter-stimulus interval minimum (seconds)
@@ -504,6 +562,32 @@ function scheduleTone(when) {
 function stopAllScheduledTones() {
   scheduledOscs.forEach((osc) => { try { osc.stop(); osc.disconnect(); } catch (e) { /* already done */ } });
   scheduledOscs = [];
+}
+
+// Distinct end-of-session chime: three ascending notes, deliberately different
+// from the single 1000 Hz probe tone so the participant clearly hears the session
+// is over. Played only on a natural (20-min) finish. Reuses the same 10 ms fades.
+function playEndAlarm() {
+  const ctx = ensureAudio();
+  const notes = [660, 880, 1175];   // ascending major-ish chime (Hz)
+  const noteDur = 0.18;             // seconds per note
+  const fade = CONFIG.fadeMs / 1000;
+  const peak = CONFIG.volume;
+  const start = ctx.currentTime + 0.05;
+  notes.forEach((hz, i) => {
+    const when = start + i * noteDur;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = hz;
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.linearRampToValueAtTime(peak, when + fade);
+    gain.gain.setValueAtTime(peak, when + Math.max(fade, noteDur - fade));
+    gain.gain.linearRampToValueAtTime(0.0001, when + noteDur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + noteDur + 0.02);
+  });
 }
 
 // Convert an AudioContext time (seconds) to the performance.now() timeline (ms).
@@ -916,10 +1000,10 @@ function endPractice() {
   disableBeforeUnload();
   releaseWakeLock();
   isPractice = false;
-  // Return to setup so experimenter can start the real session.
-  showScreen("setupScreen");
-  setMsg("Practice complete (" + practiceTrials.filter(t => t.outcome==='hit').length +
-         " hits). Ready to start the session.", "info");
+  // Show the participant banner; the experimenter taps Continue to return to setup
+  // and start the real session. Same end chime as the real session's finish.
+  showScreen("practiceDoneScreen");
+  try { playEndAlarm(); } catch (e) { /* non-fatal */ }
 }
 
 function endSession(early) {
@@ -944,7 +1028,13 @@ function endSession(early) {
   // Start the experimenter-only section collapsed each time we finish.
   $("expOnlyFin").classList.add("collapsed");
   $("expLegendFin").innerHTML = "&#9656; For experimenter only";
-  showScreen("finishedScreen");
+
+  // Every end (natural 20-min finish OR an early "End the session") is treated the
+  // same: show the participant "you're done, stop the coding task" screen + the
+  // distinct end chime, then they tap Next to the save screen. (`early` still flags
+  // the summary so the experimenter can see it was stopped early.)
+  showScreen("doneScreen");
+  try { playEndAlarm(); } catch (e) { /* non-fatal */ }
 
   // Exit fullscreen WITHOUT awaiting (fire-and-forget; may hang on iPad).
   try {
@@ -952,19 +1042,14 @@ function endSession(early) {
       document.exitFullscreen().catch(() => {});
     }
   } catch (e) { /* non-fatal */ }
-
-  // Best-effort auto-download; its failure must not affect the screen or data.
-  try { downloadFile(buildFileBase() + ".csv", csv, "text/csv"); } catch (e) { /* non-fatal */ }
 }
 
 // Return to the setup screen to run the next condition without reloading the app.
 // Confirms the data was saved first, then clears this run's data and resets the
 // condition (so the next one is picked deliberately); keeps the participant code.
 function goHome() {
-  const ok = window.confirm(
-    "Have you saved the data file (Share or Download CSV)?\n\n" +
-    "Going back clears this screen and cannot be undone.");
-  if (!ok) return;
+  // The saved-check screen already had the participant confirm the file saved, so
+  // no extra confirm dialog here.
   trials = [];
   practiceTrials = [];
   falseAlarms = [];
@@ -1214,7 +1299,32 @@ $("btnTestSound").addEventListener("click", () => {
 
 $("btnTimingCheck").addEventListener("click", () => { clearMsg(); startTimingCheck(); });
 $("btnPractice").addEventListener("click", () => { clearMsg(); startBlock(true); });
-$("btnStart").addEventListener("click", () => { clearMsg(); startBlock(false); });
+
+// Start session: validate on the setup screen (so errors stay visible there), then
+// show the coding-task reminder. The reminder's "Begin" tap actually starts the
+// session (and serves as the iOS audio-unlock / fullscreen gesture).
+$("btnStart").addEventListener("click", () => {
+  clearMsg();
+  readConfigFromUI();
+  if (!meta.participant_id) {
+    setMsg("Please enter a participant code before starting the session.", "err");
+    return;
+  }
+  if (!meta.condition) {
+    setMsg("Please select a condition before starting the session.", "err");
+    return;
+  }
+  if (CONFIG.isiMinS > CONFIG.isiMaxS) {
+    setMsg("ISI min must be ≤ ISI max.", "err");
+    return;
+  }
+  showScreen("startReminderScreen");
+});
+$("btnBeginSession").addEventListener("click", () => { clearMsg(); startBlock(false); });
+$("btnPracticeContinue").addEventListener("click", () => {
+  showScreen("setupScreen");
+  setMsg("Practice complete. Ready to start the session.", "info");
+});
 
 // Finished screen buttons.
 $("btnShareCsv").addEventListener("click", () => {
@@ -1223,7 +1333,18 @@ $("btnShareCsv").addEventListener("click", () => {
 $("btnDownloadCsv").addEventListener("click", () => {
   downloadFile(buildFileBase() + ".csv", buildCSV(), "text/csv");
 });
-$("btnHome").addEventListener("click", goHome);
+// Participant end-flow navigation: done -> save -> check-saved -> home.
+$("btnDoneNext").addEventListener("click", () => showScreen("finishedScreen"));
+$("btnFinishedNext").addEventListener("click", () => showScreen("savedCheckScreen"));
+$("btnHome2").addEventListener("click", goHome);
+
+// Check-saved screen: retry saving if the file didn't make it (same helpers as the save screen).
+$("btnShareCsv2").addEventListener("click", () => {
+  shareData(buildFileBase() + ".csv", buildCSV(), "text/csv");
+});
+$("btnDownloadCsv2").addEventListener("click", () => {
+  downloadFile(buildFileBase() + ".csv", buildCSV(), "text/csv");
+});
 
 // Finished-screen "For experimenter only" section (summary + CSV copy box),
 // password-gated like the setup screen (password 0000). Opening it renders the
